@@ -6,9 +6,13 @@ set(LLVM_LINK_COMPONENTS
         Analysis
         AsmParser
         AsmPrinter
+        BitWriter
+        BitReader
         CodeGen
         Core
+        IPO
         IRReader
+        Linker
         MC
         MIRParser
         Remarks
@@ -18,6 +22,7 @@ set(LLVM_LINK_COMPONENTS
         Target
         TransformUtils
         Vectorize
+        Passes
         )
 
 add_llvm_tool(xla-smi
