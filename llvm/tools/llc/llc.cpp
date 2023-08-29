@@ -334,7 +334,7 @@ struct LLCDiagnosticHandler : public DiagnosticHandler {
   }
 };
 
-// main - Entry point for the llc compiler.
+// TargetTriple - Entry point for the llc compiler.
 //
 int main(int argc, char **argv) {
   InitLLVM X(argc, argv);

@@ -13,6 +13,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IRReader/IRReader.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -38,10 +39,27 @@ static cl::opt<char>
              cl::Prefix, cl::init('0'));
 
 static cl::opt<std::string>
+    mcpu("mcpu",
+         cl::desc("mcpu"),
+         cl::Prefix, cl::init("none"));
+
+static cl::opt<std::string>
     InputFilename(cl::Positional, cl::desc("<input bitcode>"), cl::init("-"));
 
 static cl::opt<std::string>
     OutputFilename("o", cl::desc("Output filename"), cl::value_desc("filename"));
+
+
+[[noreturn]] static void reportError(Twine Msg, StringRef Filename = "") {
+  SmallString<256> Prefix;
+  if (!Filename.empty()) {
+    if (Filename == "-")
+      Filename = "<stdin>";
+    ("'" + Twine(Filename) + "': ").toStringRef(Prefix);
+  }
+  WithColor::error(errs(), "llc") << Prefix << Msg << "\n";
+  exit(1);
+}
 
 
 void InitializePasses(llvm::PassRegistry* pass_registry) {
@@ -57,24 +75,14 @@ void InitializePasses(llvm::PassRegistry* pass_registry) {
   llvm::initializeCodeGenPreparePass(*pass_registry);
 }
 
-int main(int argc, char** argv)
-{
-  InitLLVM X(argc, argv);
+static int compileModule(char **argv, LLVMContext &Context) {
   std::unique_ptr<Module> M;
-  LLVMContext Context;
-
-  Triple TheTriple;
-
-  LLVMInitializeNVPTXTargetInfo();
-  LLVMInitializeNVPTXTarget();
-  LLVMInitializeNVPTXTargetMC();
-  LLVMInitializeNVPTXAsmPrinter();
-
-  PassRegistry *Registry = PassRegistry::getPassRegistry();
-  cl::ParseCommandLineOptions(argc, argv, "xla-backend simulator\n");
-
-  std::string CPUStr = codegen::getCPUStr(),
-              FeaturesStr = codegen::getFeaturesStr();
+  Triple TheTriple("nvptx64-unknown-unknown");
+  std::string arch = "nvptx64";
+  std::string sm_name = mcpu;
+  SMDiagnostic Err;
+  const Target *TheTarget = nullptr;
+  std::unique_ptr<TargetMachine> Target;
 
   CodeGenOpt::Level OLvl;
   if (auto Level = CodeGenOpt::parseLevel(OptLevel)) {
@@ -84,8 +92,54 @@ int main(int argc, char** argv)
     return 1;
   }
 
-  outs()<<CPUStr<<"\n";
-  outs()<<FeaturesStr<<"\n";
+
+  auto checkDataLayout = [&](StringRef TargetTriple,
+                           StringRef DataLayout)-> std::optional<std::string>
+  {
+      TheTriple = Triple(TargetTriple.str());
+      std::string Error;
+      TheTarget =
+          TargetRegistry::lookupTarget(arch, TheTriple, Error);
+      if (!TheTarget) {
+        WithColor::error(errs(), argv[0]) << Error;
+        exit(1);
+      }
+
+      return std::optional<std::string>();
+  };
+
+
+  M = parseIRFile(InputFilename, Err, Context,
+                  ParserCallbacks(checkDataLayout));
+  if (!M) {
+    Err.print(argv[0], WithColor::error(errs(), argv[0]));
+    return 1;
+  }
+
+}
+
+int main(int argc, char** argv)
+{
+  InitLLVM X(argc, argv);
+  LLVMContext Context;
+  LLVMInitializeNVPTXTargetInfo();
+  LLVMInitializeNVPTXTarget();
+  LLVMInitializeNVPTXTargetMC();
+  LLVMInitializeNVPTXAsmPrinter();
+
+  PassRegistry *pass_registry = PassRegistry::getPassRegistry();
+  InitializePasses(pass_registry);
+
+  cl::ParseCommandLineOptions(argc, argv, "xla-backend simulator\n");
+
+  /*
+  std::string CPUStr = codegen::getCPUStr(),
+              FeaturesStr = codegen::getFeaturesStr();
+  */
+  outs()<<codegen::getMArch()<<"\n";
+
+  compileModule(argv, Context);
+
 }
 
 
